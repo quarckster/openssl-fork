@@ -22,7 +22,7 @@ jobs:
         fetch-depth: 1
         ref: ${{ github.ref_name }}
         github-server-url: "https://github.openssl.org/"
-        repository: ${{ github.repository }}
+        repository: "openssl/openssl"
         token: ${{ secrets.GHE_TOKEN }}
         path: ${{ github.ref_name }}
     - name: "Prepare assets"
