@@ -31,9 +31,9 @@ jobs:
         ./util/mktar.sh
         mkdir assets
         mv ${{ github.ref_name }}.tar.gz assets/
-        openssl sha1 < ${{ github.ref_name }}.tar.gz | cut -d " " -f 2 > assets/${{ github.ref_name }}.tar.gz.sha1
-        openssl sha256 < ${{ github.ref_name }}.tar.gz | cut -d " " -f 2 > assets/${{ github.ref_name }}.tar.gz.sha256
-        gpg -u ${{ vars.signing_key_uid }} -sba ${{ github.ref_name }}.tar.gz -o assets/${{ github.ref_name }}.tar.gz.asc
+        openssl sha1 < assets/${{ github.ref_name }}.tar.gz | cut -d " " -f 2 > assets/${{ github.ref_name }}.tar.gz.sha1
+        openssl sha256 < assets/${{ github.ref_name }}.tar.gz | cut -d " " -f 2 > assets/${{ github.ref_name }}.tar.gz.sha256
+        gpg -u ${{ vars.signing_key_uid }} -sba assets/${{ github.ref_name }}.tar.gz -o assets/${{ github.ref_name }}.tar.gz.asc
     - name: "Create release"
       env:
         GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
