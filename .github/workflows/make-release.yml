@@ -14,7 +14,7 @@ on:
 
 jobs:
   release:
-    runs-on: "releaser"
+    runs-on: "releaser-staging"
     steps:
     - name: "Checkout"
       uses: "actions/checkout@v4"
