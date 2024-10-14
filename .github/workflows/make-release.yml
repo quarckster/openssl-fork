@@ -27,6 +27,9 @@ jobs:
         path: ${{ github.ref_name }}
     - name: "Prepare assets"
       run: |
+        pwd
+        ls $(pwd)
+        cd ${{ github.ref_name }}
         ./utils/mktar.sh
         mkdir assets
         mv ${{ github.ref_name }}.tar.gz assets/
