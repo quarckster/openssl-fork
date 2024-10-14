@@ -27,9 +27,8 @@ jobs:
         path: ${{ github.ref_name }}
     - name: "Prepare assets"
       run: |
-        ls ${{ github.ref_name }}
         cd ${{ github.ref_name }}
-        ./utils/mktar.sh
+        ./util/mktar.sh
         mkdir assets
         mv ${{ github.ref_name }}.tar.gz assets/
         openssl sha1 < ${{ github.ref_name }}.tar.gz | cut -d " " -f 2 > assets/${{ github.ref_name }}.tar.gz.sha1
