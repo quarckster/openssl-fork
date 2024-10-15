@@ -11,31 +11,39 @@ on:
   push:
     tags:
       - "openssl-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag"
+        required: true
+        type: string
 
 jobs:
   release:
     runs-on: "releaser-staging"
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref }}
     steps:
     - name: "Checkout"
       uses: "actions/checkout@v4"
       with:
         fetch-depth: 1
-        ref: ${{ github.ref_name }}
+        ref: ${{ env.TAG }}
         github-server-url: "https://github.openssl.org/"
         repository: "openssl/openssl"
         token: ${{ secrets.GHE_TOKEN }}
-        path: ${{ github.ref_name }}
+        path: ${{ env.TAG }}
     - name: "Prepare assets"
       run: |
-        cd ${{ github.ref_name }}
+        cd ${{ env.TAG }}
         ./util/mktar.sh
-        mkdir assets && mv ${{ github.ref_name }}.tar.gz assets/ && cd assets
-        openssl sha1 < ${{ github.ref_name }}.tar.gz | cut -d " " -f 2 > ${{ github.ref_name }}.tar.gz.sha1
-        openssl sha256 < ${{ github.ref_name }}.tar.gz | cut -d " " -f 2 > ${{ github.ref_name }}.tar.gz.sha256
-        gpg -u ${{ vars.signing_key_uid }} -o ${{ github.ref_name }}.tar.gz.asc -sba ${{ github.ref_name }}.tar.gz
+        mkdir assets && mv ${{ env.TAG }}.tar.gz assets/ && cd assets
+        openssl sha1 < ${{ env.TAG }}.tar.gz | cut -d " " -f 2 > ${{ env.TAG }}.tar.gz.sha1
+        openssl sha256 < ${{ env.TAG }}.tar.gz | cut -d " " -f 2 > ${{ env.TAG }}.tar.gz.sha256
+        gpg -u ${{ vars.signing_key_uid }} -o ${{ env.TAG }}.tar.gz.asc -sba ${{ env.TAG }}.tar.gz
     - name: "Create release"
       env:
         GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
-        VERSION=$(echo ${{ github.ref_name }} | cut -d "-" -f 2-)
-        gh release create ${{ github.ref_name }} -t "OpenSSL $VERSION" -d --notes " " -R ${{ github.repository }} ${{ github.ref_name }}/assets/*
+        VERSION=$(echo ${{ env.TAG }} | cut -d "-" -f 2-)
+        gh release create ${{ env.TAG }} -t "OpenSSL $VERSION" -d --notes " " -R ${{ github.repository }} ${{ env.TAG }}/assets/*
