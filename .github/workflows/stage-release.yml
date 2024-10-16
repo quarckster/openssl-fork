@@ -1,0 +1,71 @@
+# Copyright 2021-2024 The OpenSSL Project Authors. All Rights Reserved.
+#
+# Licensed under the Apache License 2.0 (the "License").  You may not use
+# this file except in compliance with the License.  You can obtain a copy
+# in the file LICENSE in the source distribution or at
+# https://www.openssl.org/source/license.html
+
+name: "Stage release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewer:
+        description: "The GitHub username of the commits reviewer"
+        required: true
+      alpha:
+        description: "Start or increase the 'alpha' pre-release tag"
+        type: boolean
+      beta:
+        description: "Start or increase the 'beta' pre-release tag"
+        type: boolean
+      next-beta:
+        description: "Switch to the 'beta' pre-release tag after alpha release. It can only be given with --alpha."
+        type: boolean
+      final:
+        description: "Get out of 'alpha' or 'beta' and make a final release. Implies 'branch'."
+        type: boolean
+      branch:
+        description: "Create a release branch 'openssl-{major}.{minor}', where '{major}' and '{minor}' are the major and minor version numbers."
+        type: boolean
+
+jobs:
+  release:
+    runs-on: "releaser-staging"
+    steps:
+    - name: "Checkout openssl"
+      uses: "actions/checkout@v4"
+      with:
+        github-server-url: "https://github.openssl.org/"
+        repository: "openssl/openssl"
+        token: ${{ secrets.GHE_TOKEN }}
+        path: "openssl"
+    - name: "Checkout tools"
+      uses: "actions/checkout@v4"
+      with:
+        repository: "openssl/tools"
+        path: "tools"
+    - name: "Run stage-release.sh"
+      run: |
+        cd openssl
+        ../tools/release-tools/stage-release.sh \
+          --no-upload \
+          --unsigned \
+          --reviewer=${{ github.event.inputs.reviewer }} \
+          ${{ github.event.inputs.alpha && '--alpha' || '' }} \
+          ${{ github.event.inputs.beta && '--beta' || '' }} \
+          ${{ github.event.inputs.next-beta && '--next-beta' || '' }} \
+          ${{ github.event.inputs.final && '--final' || '' }} \
+          ${{ github.event.inputs.branch && '--branch' || '' }}
+    - name: "Push commits"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        cd ${{ github.ref }}
+        git remote add fork https://github.com/openssl-machine/openssl-quarckster.git
+        git push fork HEAD
+        gh pr create --title "$VERSION release commits" \
+                     --body "" \
+                     --reviewer ${{ github.event.inputs.reviewer }} \
+                     --repo quarckster/openssl-fork \
+                     --base ${{ github.ref }}        
