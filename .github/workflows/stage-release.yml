@@ -1,0 +1,74 @@
+# Copyright 2021-2024 The OpenSSL Project Authors. All Rights Reserved.
+#
+# Licensed under the Apache License 2.0 (the "License").  You may not use
+# this file except in compliance with the License.  You can obtain a copy
+# in the file LICENSE in the source distribution or at
+# https://www.openssl.org/source/license.html
+
+name: "Stage release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewer:
+        description: "The GitHub username of the commits reviewer"
+        required: true
+      alpha:
+        description: "Start or increase the 'alpha' pre-release tag"
+        type: boolean
+      beta:
+        description: "Start or increase the 'beta' pre-release tag"
+        type: boolean
+      next-beta:
+        description: "Switch to the 'beta' pre-release tag after alpha release. It can only be given with --alpha."
+        type: boolean
+      final:
+        description: "Get out of 'alpha' or 'beta' and make a final release. Implies 'branch'."
+        type: boolean
+      branch:
+        description: "Create a release branch 'openssl-{major}.{minor}', where '{major}' and '{minor}' are the major and minor version numbers."
+        type: boolean
+
+jobs:
+  stage-release:
+    runs-on: "releaser-staging"
+    steps:
+    - name: "Clean up"
+      run: rm -rf ${{ github.workspace }}/tools ${{ github.workspace }}/openssl
+    - name: "Checkout openssl"
+      uses: "actions/checkout@v4"
+      with:
+        #github-server-url: "https://github.openssl.org/"
+        ref: ${{ github.ref }}
+        repository: "quarckster/openssl-fork"
+        #token: ${{ secrets.GHE_TOKEN }}
+        path: "openssl"
+    - name: "Checkout tools"
+      uses: "actions/checkout@v4"
+      with:
+        repository: "openssl/tools"
+        path: "tools"
+    - name: "Run stage-release.sh"
+      run: |
+        PATH="${{ github.workspace }}/tools/review-tools/:${PATH}"
+        cd openssl
+        ../tools/release-tools/stage-release.sh \
+          ${{ inputs.alpha == true && '--alpha' || '' }} \
+          ${{ inputs.beta == true && '--beta' || '' }} \
+          ${{ inputs.next-beta == true && '--next-beta' || '' }} \
+          ${{ inputs.final == true && '--final' || '' }} \
+          ${{ inputs.branch == true && '--branch' || '' }} \
+          --no-upload \
+          --unsigned \
+          --reviewer="${{ inputs.reviewer }}"
+    - name: "Create a PR"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+      run: |
+        cd openssl
+        git remote add fork git@github.com:openssl-machine/openssl-quarckster.git
+        git push fork HEAD
+        gh pr create --title "$VERSION release commits" \
+                     --body "" \
+                     --repo quarckster/openssl-fork \
+                     --base ${{ github.ref }}        
