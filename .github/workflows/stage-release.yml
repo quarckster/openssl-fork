@@ -31,8 +31,6 @@ on:
 
 jobs:
   stage-release:
-    permissions:
-      contents: write
     runs-on: "releaser-staging"
     steps:
     - name: "Clean up"
@@ -68,7 +66,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
         cd openssl
-        git remote add fork https://openssl-machine:${{ secrets.GH_TOKEN }}@github.com/openssl-machine/openssl-quarckster.git
+        git remote add fork git@github.com:openssl-machine/openssl-quarckster.git
         git push fork HEAD
         gh pr create --title "$VERSION release commits" \
                      --body "" \
