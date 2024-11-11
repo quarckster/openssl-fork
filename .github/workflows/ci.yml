@@ -99,7 +99,7 @@ jobs:
       run: |
         util/wrap.pl -fips apps/openssl list -providers | grep 'name: CI FIPS Provider for OpenSSL$'
     - name: save artifacts
-      uses: actions/upload-artifact@v3
+      uses: "actions/upload-artifact@${{ github.server_url == 'https://github.com' && 'v4' || 'v3' }}"
       with:
         name: "ci@basic-gcc"
         path: artifacts.tar.gz
