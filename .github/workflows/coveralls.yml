@@ -10,41 +10,72 @@ name: Coverage
 # Run once a day
 on:
   schedule:
-    - cron:  '15 02 * * *'
+    - cron: '* * * * *'
   workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to measure coverage
+        required: true
+        default: master
+      extra_config:
+        description: Extra options for OpenSSL source tree configuration script
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
+  define-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      branches: ${{ steps.branches.outputs.branches }}
+    steps:
+      - name: Define branches
+        id: branches
+        run: |
+          if [ "${{ github.event_name}}" = "workflow_dispatch" ]; then
+          MATRIX=$(cat << EOF
+          [{
+            "branch": "${{ github.event.inputs.branch }}",
+            "extra_config": "${{ github.event.inputs.extra_config }}"
+          }]
+          EOF
+          )
+          else
+          MATRIX=$(cat << EOF
+          [{
+              "branch": "openssl-3.4",
+              "extra_config": "no-afalgeng enable-fips enable-tfo"
+            }, {
+              "branch": "openssl-3.3",
+              "extra_config": "no-afalgeng enable-fips enable-tfo"
+            }, {
+              "branch": "openssl-3.2",
+              "extra_config": "no-afalgeng enable-fips enable-tfo"
+            }, {
+              "branch": "openssl-3.1",
+              "extra_config": "no-afalgeng enable-fips"
+            }, {
+              "branch": "openssl-3.0",
+              "extra_config": "no-afalgeng enable-fips"
+            }, {
+              "branch": "master",
+              "extra_config": "no-afalgeng enable-fips enable-tfo"
+          }]
+          EOF
+          )
+          fi
+          echo "branches<<EOF"$'\n'"$MATRIX"$'\n'EOF >> "$GITHUB_OUTPUT"
+
   coverage:
+    needs: define-matrix
     permissions:
       checks: write     # for coverallsapp/github-action to create new checks
       contents: read    # for actions/checkout to fetch code
     strategy:
       fail-fast: false
       matrix:
-        branches: [
-          {
-            branch: openssl-3.4,
-            extra_config: no-afalgeng enable-fips enable-tfo
-          }, {
-            branch: openssl-3.3,
-            extra_config: no-afalgeng enable-fips enable-tfo
-          }, {
-            branch: openssl-3.2,
-            extra_config: no-afalgeng enable-fips enable-tfo
-          }, {
-            branch: openssl-3.1,
-            extra_config: no-afalgeng enable-fips
-          }, {
-            branch: openssl-3.0,
-            extra_config: no-afalgeng enable-fips
-          }, {
-            branch: master,
-            extra_config: no-afalgeng enable-fips enable-tfo
-          }
-        ]
+        branches: ${{ fromJSON(needs.define-matrix.outputs.branches) }}
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -67,27 +98,27 @@ jobs:
       run: sudo hostname localhost
     - name: config
       run: CC=gcc ./config --debug --coverage ${{ matrix.branches.extra_config }} no-asm enable-rc5 enable-md2 enable-ssl3 enable-nextprotoneg enable-ssl3-method enable-weak-ssl-ciphers enable-zlib enable-ec_nistp_64_gcc_128 enable-buildtest-c++ enable-ssl-trace enable-trace
-    - name: config dump
-      run: ./configdata.pm --dump
-    - name: make
-      run: make -s -j4
-    - name: get cpu info
-      run: |
-        cat /proc/cpuinfo
-        ./util/opensslwrap.sh version -c
-    - name: make test
-      run: make test TESTS='-test_external_krb5'
-    - name: generate coverage info
-      run: lcov -d . -c
-             --exclude "${PWD}/test/*"
-             --exclude "${PWD}/fuzz/*"
-             --exclude "/usr/include/*"
-             --ignore-errors mismatch
-              -o ./lcov.info
-    - name: Coveralls upload
-      uses: coverallsapp/github-action@v2.3.2
-      with:
-        github-token: ${{ secrets.github_token }}
-        git-branch: ${{ matrix.branches.branch }}
-        git-commit: ${{ env.githubid }}
-        path-to-lcov: ./lcov.info
+    # - name: config dump
+    #   run: ./configdata.pm --dump
+    # - name: make
+    #   run: make -s -j4
+    # - name: get cpu info
+    #   run: |
+    #     cat /proc/cpuinfo
+    #     ./util/opensslwrap.sh version -c
+    # - name: make test
+    #   run: make test TESTS='-test_external_krb5'
+    # - name: generate coverage info
+    #   run: lcov -d . -c
+    #          --exclude "${PWD}/test/*"
+    #          --exclude "${PWD}/fuzz/*"
+    #          --exclude "/usr/include/*"
+    #          --ignore-errors mismatch
+    #           -o ./lcov.info
+    # - name: Coveralls upload
+    #   uses: coverallsapp/github-action@v2.3.2
+    #   with:
+    #     github-token: ${{ secrets.github_token }}
+    #     git-branch: ${{ matrix.branches.branch }}
+    #     git-commit: ${{ env.githubid }}
+    #     path-to-lcov: ./lcov.info
