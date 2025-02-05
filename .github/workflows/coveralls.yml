@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2021-2025 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -7,10 +7,9 @@
 
 name: Coverage
 
-# Run once a day
 on:
   schedule:
-    - cron: '* * * * *'
+    - cron: '15 02 * * *'
   workflow_dispatch:
     inputs:
       branch:
@@ -18,7 +17,7 @@ on:
         required: true
         default: master
       extra_config:
-        description: Extra options for OpenSSL source tree configuration script
+        description: Extra options for configuration script
         default: ""
 
 permissions:
