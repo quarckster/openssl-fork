@@ -13,3 +13,5 @@ jobs:
         run: "echo $GITHUB_HEAD_REF"
       - name: "ls"
         run: "tree"
+      - name: "pwd"
+        run: "pwd"
