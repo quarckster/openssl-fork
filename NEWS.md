@@ -22,6 +22,10 @@ OpenSSL Releases
 OpenSSL 3.4
 -----------
 
+### Major changes between OpenSSL 3.4.2 and OpenSSL 3.4.3 [under development]
+
+  * none
+
 ### Major changes between OpenSSL 3.4.1 and OpenSSL 3.4.2 [12 Mar 2025]
 
   * none

@@ -27,6 +27,10 @@ OpenSSL Releases
 OpenSSL 3.4
 -----------
 
+### Changes between 3.4.2 and 3.4.3 [xx XXX xxxx]
+
+ * none yet
+
 ### Changes between 3.4.1 and 3.4.2 [12 Mar 2025]
 
  * When displaying distinguished names in the openssl application escape control
