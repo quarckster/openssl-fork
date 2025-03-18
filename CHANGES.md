@@ -28,6 +28,10 @@ OpenSSL Releases
 OpenSSL 3.5
 -----------
 
+### Changes between 3.5 and 3.6 [xx XXX xxxx]
+
+ * none yet
+
 ### Changes between 3.4 and 3.5 [xx XXX xxxx]
 
 * Added new API to enable 0-RTT for 3rd party QUIC stacks.
