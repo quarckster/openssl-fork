@@ -307,7 +307,7 @@ static struct rcu_qp *get_hold_current_qp(struct rcu_lock_st *lock)
          * systems like x86, but is relevant on other arches
          */
         ATOMIC_ADD_FETCH(&lock->qp_group[qp_idx].users, (uint64_t)1,
-                         __ATOMIC_ACQUIRE);
+                         __ATOMIC_RELAXED);
 
         /* if the idx hasn't changed, we're good, else try again */
         if (qp_idx == ATOMIC_LOAD_N(uint32_t, &lock->reader_idx,
@@ -447,7 +447,7 @@ static struct rcu_qp *update_qp(CRYPTO_RCU_LOCK *lock, uint32_t *curr_id)
      * when get_hold_current_qp acquires the next qp
      */
     ATOMIC_STORE_N(uint32_t, &lock->reader_idx, lock->current_alloc_idx,
-                   __ATOMIC_RELEASE);
+                   __ATOMIC_RELAXED);
 
     /*
      * this should make sure that the new value of reader_idx is visible in

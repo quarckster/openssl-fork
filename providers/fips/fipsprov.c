@@ -38,6 +38,8 @@ static const char FIPS_UNAPPROVED_PROPERTIES[] = "provider=fips,fips=no";
  * Forward declarations to ensure that interface functions are correctly
  * defined.
  */
+
+ /* TEST: change to trigger FIPS checksum difference */
 static OSSL_FUNC_provider_teardown_fn fips_teardown;
 static OSSL_FUNC_provider_gettable_params_fn fips_gettable_params;
 static OSSL_FUNC_provider_get_params_fn fips_get_params;
