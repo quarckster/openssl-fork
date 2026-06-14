@@ -29,7 +29,7 @@ OpenSSL Releases
 
 -----------
 
-### Changes between 4.0.1 and 4.0.2 [xx XXX xxxx]
+### Changes between 4.0.1 and 4.0.2 [14 Jun 2026]
 
  * none yet
 

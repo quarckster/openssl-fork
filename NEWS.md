@@ -25,7 +25,7 @@ OpenSSL Releases
 OpenSSL 4.0
 -----------
 
-### Major changes between OpenSSL 4.0.1 and OpenSSL 4.0.2 [under development]
+### Major changes between OpenSSL 4.0.1 and OpenSSL 4.0.2 [14 Jun 2026]
 
   * none
 
