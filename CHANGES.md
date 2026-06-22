@@ -22,7 +22,7 @@ OpenSSL Releases
 OpenSSL 3.1
 -----------
 
-### Changes between 3.1.8 and 3.1.9 [xx XXX xxxx]
+### Changes between 3.1.8 and 3.1.9 [22 Jun 2026]
 
  * none yet
 
