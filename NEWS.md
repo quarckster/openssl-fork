@@ -19,6 +19,10 @@ OpenSSL Releases
 OpenSSL 3.1
 -----------
 
+### Major changes between OpenSSL 3.1.9 and OpenSSL 3.1.10 [under development]
+
+  * none
+
 ### Major changes between OpenSSL 3.1.8 and OpenSSL 3.1.9 [22 Jun 2026]
 
   * none
