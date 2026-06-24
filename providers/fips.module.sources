@@ -172,8 +172,7 @@ crypto/ec/asm/x25519-ppc64.pl
 crypto/ec/asm/x25519-x86_64.pl
 crypto/ec/curve25519.c
 crypto/ec/curve448/arch_32/f_impl32.c
-crypto/ec/curve448/arch_64/arch_intrinsics.h
-crypto/ec/curve448/arch_64/f_impl.h
+crypto/ec/curve448/arch_64/arch_intrinsics.inc
 crypto/ec/curve448/arch_64/f_impl64.c
 crypto/ec/curve448/curve448.c
 crypto/ec/curve448/curve448_local.h
@@ -484,6 +483,7 @@ include/internal/ffc.h
 include/internal/fips.h
 include/internal/hashfunc.h
 include/internal/hashtable.h
+include/internal/list.h
 include/internal/mem_alloc_utils.h
 include/internal/namemap.h
 include/internal/nelem.h
@@ -511,6 +511,7 @@ include/internal/tlsgroups.h
 include/internal/tlssigalgs.h
 include/internal/to_hex.h
 include/internal/tsan_assist.h
+include/internal/zeroization.h
 include/openssl/aes.h
 include/openssl/asn1.h.in
 include/openssl/asn1err.h
@@ -738,6 +739,8 @@ providers/implementations/kdfs/hkdf.c
 providers/implementations/kdfs/hkdf.inc.in
 providers/implementations/kdfs/hmacdrbg_kdf.c
 providers/implementations/kdfs/hmacdrbg_kdf.inc.in
+providers/implementations/kdfs/ikev2kdf.c
+providers/implementations/kdfs/ikev2kdf.inc.in
 providers/implementations/kdfs/kbkdf.c
 providers/implementations/kdfs/kbkdf.inc.in
 providers/implementations/kdfs/pbkdf2.c
@@ -806,6 +809,7 @@ providers/implementations/signature/ecdsa_sig.inc.in
 providers/implementations/signature/eddsa_sig.c
 providers/implementations/signature/eddsa_sig.inc.in
 providers/implementations/signature/mac_legacy_sig.c
+providers/implementations/signature/mac_legacy_sig.inc.in
 providers/implementations/signature/ml_dsa_sig.c
 providers/implementations/signature/ml_dsa_sig.inc.in
 providers/implementations/signature/rsa_sig.c
