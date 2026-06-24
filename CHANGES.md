@@ -29,6 +29,10 @@ OpenSSL Releases
 
 -----------
 
+### Changes between 4.1 and 4.2 [xx XXX xxxx]
+
+ * none yet
+
 ### Changes between 4.0 and 4.1 [xx XXX xxxx]
 
  * Added support for Ed25519 and Ed448 certificates in DTLS 1.2. Previously,
