@@ -26,7 +26,7 @@ OpenSSL Releases
 OpenSSL 4.1
 -----------
 
-### Major changes between OpenSSL 4.0 and OpenSSL 4.1 [under development]
+### Major changes between OpenSSL 4.0 and OpenSSL 4.1 alpha 1 [in pre-release]
 
   * API calls `CRYPTO_atomic_load_ptr`, `CRYPTO_atomic_store_ptr`, and
     `CRYPTO_atomic_cmp_exch_ptr` have been added.
