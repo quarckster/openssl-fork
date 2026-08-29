@@ -1,0 +1,62 @@
+# Copyright 2023-2025 The OpenSSL Project Authors. All Rights Reserved.
+#
+# Licensed under the Apache License 2.0 (the "License").  You may not use
+# this file except in compliance with the License.  You can obtain a copy
+# in the file LICENSE in the source distribution or at
+# https://www.openssl.org/source/license.html
+
+# This verifies that FIPS and legacy providers built against some earlier
+# released versions continue to run against the current branch.
+
+name: Sync approval label
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+jobs:
+  approval-label:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Sync approval label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          COMMITTERS: ${{ vars.COMMITTERS }}
+          LABEL: "approval:done"
+          REQUIRED: "2"
+        run: |
+          read -r approvals has_cr < <(
+            gh pr view "$NUMBER" --json reviews --jq -r '
+              (env.COMMITTERS | fromjson) as $committers
+              | [.reviews[]
+                  | {login: .author.login, state: .state, submittedAt: .submittedAt}
+                ]
+              | sort_by(.login, .submittedAt)
+              | group_by(.login)
+              | map(last)
+              | map(select(.login | IN($committers[])))
+              | [
+                  (map(select(.state == "APPROVED")) | length),
+                  (any(.state == "CHANGES_REQUESTED"))
+                ]
+              | @tsv
+            '
+          )
+
+          echo "Committer approvals: $approvals"
+          echo "Any committer requested changes: $has_cr"
+
+          if [ "$has_cr" = "true" ]; then
+            gh pr edit "$NUMBER" --remove-label "$LABEL" || true
+            exit 0
+          fi
+
+          if [ "$approvals" -ge "$REQUIRED" ]; then
+            gh pr edit "$NUMBER" --add-label "$LABEL"
+          else
+            gh pr edit "$NUMBER" --remove-label "$LABEL" || true
+          fi
