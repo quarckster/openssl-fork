@@ -93,11 +93,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The -MSVC2013 targets set needs_c99_snprintf_compat, which builds the
+        # snprintf/vsnprintf the MSVC 12.0 CRT does not provide.
         include:
           - arch: amd64
-            target: VC-WIN64A
+            target: VC-WIN64A-MSVC2013
           - arch: x86
-            target: VC-WIN32
+            target: VC-WIN32-MSVC2013
     runs-on: windows-2022
     env:
       IMAGE: ghcr.io/openssl/openssl-vs2013:latest
