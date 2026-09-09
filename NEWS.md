@@ -26,6 +26,10 @@ OpenSSL Releases
 OpenSSL 4.1
 -----------
 
+### Major changes between OpenSSL 4.2 and OpenSSL 4.3 [under development]
+
+  * none
+
 ### Major changes between OpenSSL 4.1 and OpenSSL 4.2 [under development]
 
   * none

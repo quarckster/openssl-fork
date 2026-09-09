@@ -30,6 +30,10 @@ OpenSSL Releases
 OpenSSL 4.1
 -----------
 
+### Changes between 4.2 and 4.3 [xx XXX xxxx]
+
+ * none yet
+
 ### Changes between 4.1 and 4.2 [xx XXX xxxx]
 
  * none yet
