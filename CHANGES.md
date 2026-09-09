@@ -30,7 +30,7 @@ OpenSSL Releases
 OpenSSL 4.1
 -----------
 
-### Changes between 4.1 and 4.2 alpha 1 [9 Sep 2026]
+### Changes between 4.1 and 4.2 [xx XXX xxxx]
 
  * none yet
 
