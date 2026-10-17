@@ -661,10 +661,10 @@ static const struct archetype_data archetypes[QUIC_ENC_LEVEL_NUM][TX_PACKETISER_
             /*allow_new_token                 =*/ 0,
             /*allow_force_ack_eliciting       =*/ 1,
         },
-        /* EL 0(INITIAL) - Archetype 1(ACK_ONLY) */
+        /* EL 0(INITIAL) - Archetype 1(ACK_AND_PING_ONLY) */
         {
             /*allow_ack                       =*/ 1,
-            /*allow_ping                      =*/ 0,
+            /*allow_ping                      =*/ 1,
             /*allow_crypto                    =*/ 0,
             /*allow_handshake_done            =*/ 0,
             /*allow_path_challenge            =*/ 0,
@@ -698,10 +698,10 @@ static const struct archetype_data archetypes[QUIC_ENC_LEVEL_NUM][TX_PACKETISER_
             /*allow_new_token                 =*/ 0,
             /*allow_force_ack_eliciting       =*/ 1,
         },
-        /* EL 1(HANDSHAKE) - Archetype 1(ACK_ONLY) */
+        /* EL 1(HANDSHAKE) - Archetype 1(ACK_AND_PING_ONLY) */
         {
             /*allow_ack                       =*/ 1,
-            /*allow_ping                      =*/ 0,
+            /*allow_ping                      =*/ 1,
             /*allow_crypto                    =*/ 0,
             /*allow_handshake_done            =*/ 0,
             /*allow_path_challenge            =*/ 0,
@@ -735,10 +735,10 @@ static const struct archetype_data archetypes[QUIC_ENC_LEVEL_NUM][TX_PACKETISER_
             /*allow_new_token                 =*/ 0,
             /*allow_force_ack_eliciting       =*/ 0,
         },
-        /* EL 2(0RTT) - Archetype 1(ACK_ONLY) */
+        /* EL 2(0RTT) - Archetype 1(ACK_AND_PING_ONLY) */
         {
             /*allow_ack                       =*/ 0,
-            /*allow_ping                      =*/ 0,
+            /*allow_ping                      =*/ 1,
             /*allow_crypto                    =*/ 0,
             /*allow_handshake_done            =*/ 0,
             /*allow_path_challenge            =*/ 0,
@@ -772,10 +772,10 @@ static const struct archetype_data archetypes[QUIC_ENC_LEVEL_NUM][TX_PACKETISER_
             /*allow_new_token                 =*/ 1,
             /*allow_force_ack_eliciting       =*/ 1,
         },
-        /* EL 3(1RTT) - Archetype 1(ACK_ONLY) */
+        /* EL 3(1RTT) - Archetype 1(ACK_AND_PING_ONLY) */
         {
             /*allow_ack                       =*/ 1,
-            /*allow_ping                      =*/ 0,
+            /*allow_ping                      =*/ 1,
             /*allow_crypto                    =*/ 0,
             /*allow_handshake_done            =*/ 0,
             /*allow_path_challenge            =*/ 0,
@@ -999,10 +999,13 @@ static int txp_generate_for_el(OSSL_QUIC_TX_PACKETISER *txp, uint32_t enc_level,
     /* Determine the limit CC imposes on what we can send. */
     if (!cc_can_send) {
         /*
-         * If we are called when we cannot send, this must be because we want
-         * to generate a probe. In this circumstance, don't clamp based on CC.
+         * If we are called when we cannot send, this must be because we want to
+         * generate a probe. In this circumstance, don't clamp based on CC, but
+         * don't add application data and limit ourselves to generating a small
+         * packet containing only PING and ACK frames.
          */
-        cc_limit = SIZE_MAX;
+        cc_limit  = SIZE_MAX;
+        archetype = TX_PACKETISER_ARCHETYPE_ACK_AND_PING_ONLY;
     } else {
         /* Allow CC to clamp how much we can send. */
         cc_limit_ = txp->args.cc_method->get_tx_allowance(txp->args.cc_data);
@@ -1271,7 +1274,8 @@ static int txp_generate_pre_token(OSSL_QUIC_TX_PACKETISER *txp,
                                   QUIC_TXPIM_PKT *tpkt,
                                   uint32_t pn_space,
                                   struct archetype_data *a,
-                                  int chosen_for_conn_close)
+                                  int chosen_for_conn_close,
+                                  int *can_be_non_inflight)
 {
     const OSSL_QUIC_FRAME_ACK *ack;
     OSSL_QUIC_FRAME_ACK ack2;
@@ -1347,6 +1351,8 @@ static int txp_generate_pre_token(OSSL_QUIC_TX_PACKETISER *txp,
         if (ossl_quic_wire_encode_frame_conn_close(wpkt, pf)) {
             if (!tx_helper_commit(h))
                 return 0;
+
+            *can_be_non_inflight = 0;
         } else {
             tx_helper_rollback(h);
         }
@@ -2023,6 +2029,15 @@ static int txp_generate_for_el_actual(OSSL_QUIC_TX_PACKETISER *txp,
     uint32_t pn_space = ossl_quic_enc_level_to_pn_space(enc_level);
     struct tx_helper h;
     int have_helper = 0, have_ack_eliciting = 0, done_pre_token = 0;
+    /*
+     * Cleared if we encode any non-ACK-eliciting frame type which rules out the
+     * packet being a non-inflight frame. This means any non-ACK ACK-eliciting
+     * frame, even PADDING frames. ACK eliciting frames always cause a packet to
+     * become ineligible for non-inflight treatment so it is not necessary to
+     * clear this in cases where have_ack_eliciting is set, as it is ignored in
+     * that case.
+     */
+    int can_be_non_inflight = 1;
     int require_ack_eliciting = 0;
     QUIC_CFQ_ITEM *cfq_item;
     QUIC_TXPIM_PKT *tpkt = NULL;
@@ -2202,7 +2217,8 @@ static int txp_generate_for_el_actual(OSSL_QUIC_TX_PACKETISER *txp,
                  */
                 if (!done_pre_token)
                     if (txp_generate_pre_token(txp, &h, tpkt, pn_space, &a,
-                                               chosen_for_conn_close))
+                                               chosen_for_conn_close,
+                                               &can_be_non_inflight))
                         done_pre_token = 1;
 
                 break;
@@ -2236,7 +2252,8 @@ static int txp_generate_for_el_actual(OSSL_QUIC_TX_PACKETISER *txp,
      */
     if (!done_pre_token)
         if (txp_generate_pre_token(txp, &h, tpkt, pn_space, &a,
-                                   chosen_for_conn_close))
+                                   chosen_for_conn_close,
+                                   &can_be_non_inflight))
             done_pre_token = 1;
 
     /* CRYPTO Frames */
@@ -2282,18 +2299,23 @@ static int txp_generate_for_el_actual(OSSL_QUIC_TX_PACKETISER *txp,
         if (!ossl_quic_wire_encode_padding(wpkt, min_ppl - h.bytes_appended)
             || !tx_helper_commit(&h))
             goto fatal_err;
+
+        can_be_non_inflight = 0;
     }
 
     /*
      * Dispatch
      * ========
      */
+    if (have_ack_eliciting)
+        can_be_non_inflight = 0;
+
     /* ACKM Data */
     tpkt->ackm_pkt.num_bytes        = h.bytes_appended + pkt_overhead;
     tpkt->ackm_pkt.pkt_num          = txp->next_pn[pn_space];
     /* largest_acked is set in txp_generate_pre_token */
     tpkt->ackm_pkt.pkt_space        = pn_space;
-    tpkt->ackm_pkt.is_inflight      = 1;
+    tpkt->ackm_pkt.is_inflight      = !can_be_non_inflight;
     tpkt->ackm_pkt.is_ack_eliciting = have_ack_eliciting;
     tpkt->ackm_pkt.is_pto_probe     = 0;
     tpkt->ackm_pkt.is_mtu_probe     = 0;
