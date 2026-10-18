@@ -31,6 +31,23 @@ OpenSSL Releases
 
 ### Changes between 4.0 and 4.1 [xx XXX xxxx]
 
+ * Rewrote the RFC 3779 ASIdentifier / IPAddrBlock canonicalization
+   merge in `X509v3_asid_canonize` and `X509v3_addr_canonize` from an
+   in-place loop that called `sk_..._delete()` after each merge to a
+   single linear sweep using a write index.  The previous code was
+   O(N^2) because of the per-merge stack shift; the rewrite is O(N)
+   after the initial sort, eliminating an algorithmic-complexity cost
+   on adversarial input reaching these canonicalisation helpers via the
+   `v2i` config-format parser (e.g. `X509V3_EXT_conf` and the
+   `sbgp-autonomousSysNum` / `sbgp-ipAddrBlock` syntax handled by
+   `openssl ca` / `openssl req`) or via direct callers of the public
+   `X509v3_asid_canonize` / `X509v3_addr_canonize` API.  The X.509
+   verification path is not affected: `X509v3_*_validate_path` reaches
+   only `X509v3_*_is_canonical` (O(N), unchanged) and the
+   `*_contains` walk, never the merge.
+
+   *Niels Provos*
+
  * SubjectPublicKeyInfo blobs whose AlgorithmIdentifier uses id-RSAES-OAEP
    (NID_rsaesOaep, 1.2.840.113549.1.1.7) with a plain RSAPublicKey body
    are now decoded as RSA keys.  This is required for interoperability
