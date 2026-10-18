@@ -42,6 +42,11 @@ OpenSSL Releases
 
    *Shane Lontis*
 
+ * Include support of parsing Java-generated PKCS#12 files containing symmetric
+   keys.
+
+   *Dmitry Belyavskiy*
+
  * The API functions `CRYPTO_atomic_load_ptr`, `CRYPTO_atomic_store_ptr`, and
    `CRYPTO_atomic_cmp_exch_ptr` have been added to libcrypto.
 
