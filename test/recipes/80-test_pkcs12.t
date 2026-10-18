@@ -9,7 +9,7 @@
 use strict;
 use warnings;
 
-use OpenSSL::Test qw/:DEFAULT srctop_file bldtop_dir with/;
+use OpenSSL::Test qw/:DEFAULT srctop_file bldtop_dir bldtop_file with/;
 use OpenSSL::Test::Utils;
 
 use Encode;
@@ -56,7 +56,7 @@ $ENV{OPENSSL_WIN32_UTF8}=1;
 
 my $no_fips = disabled('fips') || ($ENV{NO_FIPS} // 0);
 
-plan tests => 59 + ($no_fips ? 0 : 5);
+plan tests => 72 + ($no_fips ? 0 : 5);
 
 # Test different PKCS#12 formats
 ok(run(test(["pkcs12_format_test"])), "test pkcs12 formats");
@@ -455,6 +455,82 @@ for my $file ("BOOLEAN-in-friendlyName-of-key-pbmac1.p12",
             ok(scalar @match > 0 ? 0 : 1, "Test against CVE-2026-22795 , missing ASN1_TYPE validation in keys, pbmac1");
         }
     );
+}
+
+# Test Java PKCS#12 files with symmetric keys
+{
+    my $java_p12 = srctop_file("test", "recipes", "80-test_pkcs12_data", "java-skey.p12");
+    my $skey_out = "skey-out.bin";
+    my $skey_raw = "skey-raw.bin";
+
+    # Test 1: Info display shows secret bag
+    # pkcs12 outputs bag info to stderr, so we use shell redirection to merge streams
+    my $openssl_cmd = bldtop_file("apps", "openssl");
+    my $wrapper = bldtop_file("util", "wrap.pl");
+    my $cmd = "$^X $wrapper $openssl_cmd pkcs12 -info -in $java_p12 -passin pass:password 2>&1";
+    my @combined_output = `$cmd`;
+
+    ok(grep(/Secret bag/, @combined_output) > 0,
+       "test Java PKCS#12 info displays secret bag");
+    ok(grep(/Bag Type: pkcs8ShroudedKeyBag/, @combined_output) > 0,
+       "test Java PKCS#12 info shows bag type");
+    ok(grep(/friendlyName: my-explicit-key/, @combined_output) > 0,
+       "test Java PKCS#12 info shows friendly name");
+
+    # Test 2: Extract symmetric key with metadata (default)
+    ok(run(app(["openssl", "pkcs12", "-in", $java_p12, "-nocerts",
+                "-out", $skey_out, "-passin", "pass:password"])),
+       "test Java PKCS#12 extract symmetric key with metadata");
+
+    # Verify output contains metadata
+    open my $fh, '<', $skey_out or die "Cannot open $skey_out: $!";
+    my $content = do { local $/; <$fh> };
+    close $fh;
+    ok($content =~ /Bag Attributes/,
+       "test extracted key contains bag attributes");
+    ok($content =~ /Algorithm:/ && $content =~ /Key Length: 32 bytes/ && $content =~ /Key Data:/,
+       "test extracted key contains algorithm, key length and key data labels");
+    ok($content =~ /414141414141/,
+       "test extracted key contains hex data");
+
+    # Test 3: Extract symmetric key as raw binary
+    ok(run(app(["openssl", "pkcs12", "-in", $java_p12, "-nocerts",
+                "-out", $skey_raw, "-passin", "pass:password", "-raw"])),
+       "test Java PKCS#12 extract symmetric key with -raw option");
+
+    # Verify raw output is exactly 32 bytes
+    ok(-s $skey_raw == 32,
+       "test raw extracted key is 32 bytes");
+
+    # Verify raw output contains only key bytes (0x41 repeated)
+    open $fh, '<:raw', $skey_raw or die "Cannot open $skey_raw: $!";
+    my $raw_content = do { local $/; <$fh> };
+    close $fh;
+    ok($raw_content eq ("A" x 32),
+       "test raw extracted key contains correct binary data");
+
+    # Cleanup
+    unlink $skey_out, $skey_raw;
+}
+
+# Test PKCS12_parse_ex() with Java symmetric key file
+ok(run(test(["pkcs12_api_test",
+             "-in", srctop_file("test", "recipes", "80-test_pkcs12_data", "java-skey.p12"),
+             "-pass", "password",
+             "-has-skey", "1",
+             ])), "Test PKCS12_parse_ex() with symmetric key");
+
+# Test OSSL_STORE with Java symmetric key file
+{
+    my @output = run(app(["openssl", "storeutl",
+                         "-passin", "pass:password",
+                         srctop_file("test", "recipes", "80-test_pkcs12_data", "java-skey.p12")]),
+                    capture => 1);
+    ok(@output > 0, "Test OSSL_STORE loads symmetric key from PKCS#12");
+
+    # Verify output contains "Symmetric key"
+    my $output_text = join("", @output);
+    like($output_text, qr/Symmetric key/, "OSSL_STORE output shows symmetric key");
 }
 
 SetConsoleOutputCP($savedcp) if (defined($savedcp));
