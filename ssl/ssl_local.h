@@ -1815,6 +1815,25 @@ struct ssl_connection_st {
         int peer_sent_trust_anchors;
 
         /*
+         * The server's AvailableTrustAnchorList from the trust_anchors
+         * extension in EncryptedExtensions, as wire-format u8-length-prefixed
+         * trust anchor IDs.  A client that was sent no certificate it trusts
+         * can pick one of these and try again.  NULL when the server sent no
+         * list; the list itself is never empty.
+         */
+        size_t peer_available_trust_anchors_len;
+        uint8_t *peer_available_trust_anchors;
+
+        /*
+         * Set when the peer marked the certificate it sent as one it chose for
+         * a trust anchor we asked for: the empty trust_anchors extension in
+         * the first CertificateEntry.  The certificate_list is then a complete
+         * path from that trust anchor, so a relying party may validate it as
+         * given rather than building a path.
+         */
+        int peer_matched_trust_anchor;
+
+        /*
          * The RequestedTrustAnchorList this client advertises, as wire-format
          * u8-length-prefixed trust anchor IDs.  When requested_trust_anchors_set
          * is 0 the list has not been configured and the trusted MTC CAs are
@@ -2773,6 +2792,15 @@ int ossl_ssl_trust_anchor_pattern_contains(const uint8_t *pattern,
  * @param ids_len the length of ids in bytes
  * @return 1 if the credential matches a requested ID, 0 otherwise
  */
+/**
+ * @brief Whether a credential can be used on this connection.
+ * @param s the connection, whose shared signature algorithms are consulted
+ * @param cred the credential
+ * @returns 1 if some shared signature algorithm works with the credential's
+ *          key, 0 otherwise.
+ */
+int ossl_tls_credential_usable(SSL_CONNECTION *s, const SSL_CREDENTIAL *cred);
+
 int ossl_ssl_credential_matches_request(const SSL_CREDENTIAL *cred,
     const uint8_t *ids, size_t ids_len);
 
