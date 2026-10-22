@@ -891,6 +891,25 @@ STACK_OF(OSSL_MTC_COSIGNER) *load_mtc_cosigners(SSL_CTX *ctx, const char *file)
     return cosigners;
 }
 
+/**
+ * @brief Find the CA in cas whose trust anchor ID is text in dotted decimal.
+ * @param cas the trusted MTC CAs
+ * @param text the trust anchor ID in dotted decimal, NUL terminated
+ * @returns the CA, or NULL if text is not a valid ID or no CA has it
+ */
+static OSSL_MTC_CA *find_mtc_ca(STACK_OF(OSSL_MTC_CA) *cas, const char *text)
+{
+    BUF_MEM *buf;
+    OSSL_MTC_CA *ca = NULL;
+
+    if ((buf = BUF_MEM_new()) == NULL)
+        return NULL;
+    if (app_reloid_from_text(buf, text, strlen(text)))
+        ca = OSSL_MTC_CA_find(cas, (const uint8_t *)buf->data, buf->length);
+    BUF_MEM_free(buf);
+    return ca;
+}
+
 /*
  * Load one MTC log's active landmarks from "id:log:file", where id is the CA's
  * trust anchor ID in dotted text, log is the decimal log number, and file holds
@@ -933,7 +952,7 @@ int load_mtc_landmarks(STACK_OF(OSSL_MTC_CA) *cas, const char *spec,
         goto err;
     }
 
-    if ((ca = OSSL_MTC_CA_find(cas, NULL, 0, dup)) == NULL) {
+    if ((ca = find_mtc_ca(cas, dup)) == NULL) {
         BIO_printf(bio_err, "No -mtc_cas CA matches trust anchor ID '%s'\n",
             dup);
         goto err;
@@ -986,7 +1005,7 @@ int load_mtc_subtrees(STACK_OF(OSSL_MTC_CA) *cas, const char *file)
             BIO_printf(bio_err, "Malformed MTC subtree line: %s", line);
             goto err;
         }
-        if ((ca = OSSL_MTC_CA_find(cas, NULL, 0, oid)) == NULL) {
+        if ((ca = find_mtc_ca(cas, oid)) == NULL) {
             BIO_printf(bio_err,
                 "No -mtc_cas CA matches trust anchor ID '%s'\n", oid);
             goto err;
@@ -1102,7 +1121,7 @@ int app_reloid_from_text(BUF_MEM *buf, const char *text, size_t text_len)
  * @param text the ID in dotted decimal or "0x"-prefixed hex, not NUL terminated
  * @param text_len the number of bytes at text
  * @returns 1 on success, 0 if the ID is malformed, empty or longer than
- *          UINT8_MAX bytes, or on allocation failure.
+ *          TLSEXT_TRUST_ANCHOR_ID_MAX_LEN, or on allocation failure.
  */
 static int append_requested_tai(BUF_MEM *buf, const char *text, size_t text_len)
 {
@@ -1112,7 +1131,7 @@ static int append_requested_tai(BUF_MEM *buf, const char *text, size_t text_len)
     if (!buf_append(buf, &zero, 1))
         return 0;
     if (text_len >= 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
-        uint8_t id[UINT8_MAX];
+        uint8_t id[TLSEXT_TRUST_ANCHOR_ID_MAX_LEN];
         char *hex = OPENSSL_strndup(text + 2, text_len - 2);
         int ok = hex != NULL
             && OPENSSL_hexstr2buf_ex(id, sizeof(id), &id_len, hex, '\0')
@@ -1125,7 +1144,7 @@ static int append_requested_tai(BUF_MEM *buf, const char *text, size_t text_len)
         return 0;
     }
     id_len = buf->length - at - 1;
-    if (id_len == 0 || id_len > UINT8_MAX)
+    if (id_len == 0 || id_len > TLSEXT_TRUST_ANCHOR_ID_MAX_LEN)
         return 0;
     buf->data[at] = (char)id_len;
     return 1;
