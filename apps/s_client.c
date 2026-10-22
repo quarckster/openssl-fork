@@ -581,6 +581,8 @@ typedef enum OPTION_choice {
     OPT_CHAINCASTORE,
     OPT_VERIFYCASTORE,
     OPT_MTC_CAS,
+    OPT_MTC_LANDMARKS,
+    OPT_MTC_SUBTREES,
     OPT_REQUEST_TAIS,
     OPT_SERVERINFO,
     OPT_STARTTLS,
@@ -698,6 +700,12 @@ const OPTIONS s_client_options[] = {
     { "CAstore", OPT_CASTORE, ':', "URI of store with trusted CA certs" },
     { "mtc_cas", OPT_MTC_CAS, '<',
         "File of Merkle Tree Certificate CA certs to trust and request" },
+    { "mtc_landmarks", OPT_MTC_LANDMARKS, 's',
+        "Active landmarks of one -mtc_cas log, as id:log:file, where file holds"
+        " the CA's published landmark description (may be given more than once)" },
+    { "mtc_subtrees", OPT_MTC_SUBTREES, '<',
+        "File of vetted subtree hashes for the -mtc_landmarks logs"
+        " (landmark-relative MTC)" },
     { "request-tais", OPT_REQUEST_TAIS, 's',
         "Comma-separated trust anchor IDs to request of the server, each"
         " dotted decimal or 0x hex; empty requests none" },
@@ -1018,7 +1026,8 @@ int s_client_main(int argc, char **argv)
     STACK_OF(X509_CRL) *crls = NULL;
     const SSL_METHOD *meth = TLS_client_method();
     const char *CApath = NULL, *CAfile = NULL, *CAstore = NULL;
-    const char *mtc_cas_file = NULL;
+    const char *mtc_cas_file = NULL, *mtc_subtrees_file = NULL;
+    STACK_OF(OPENSSL_STRING) *mtc_landmarks = NULL;
     STACK_OF(OSSL_MTC_CA) *mtc_cas = NULL;
     const char *request_tais = NULL;
     char *cbuf = NULL, *sbuf = NULL, *mbuf = NULL;
@@ -1625,6 +1634,16 @@ int s_client_main(int argc, char **argv)
             break;
         case OPT_MTC_CAS:
             mtc_cas_file = opt_arg();
+            break;
+        case OPT_MTC_LANDMARKS:
+            if (mtc_landmarks == NULL
+                && (mtc_landmarks = sk_OPENSSL_STRING_new_null()) == NULL)
+                goto end;
+            if (!sk_OPENSSL_STRING_push(mtc_landmarks, opt_arg()))
+                goto end;
+            break;
+        case OPT_MTC_SUBTREES:
+            mtc_subtrees_file = opt_arg();
             break;
         case OPT_REQUEST_TAIS:
             request_tais = opt_arg();
@@ -2271,6 +2290,32 @@ int s_client_main(int argc, char **argv)
     if (mtc_cas_file != NULL
         && (mtc_cas = load_mtc_cas(ctx, mtc_cas_file)) == NULL)
         goto end;
+
+    /*
+     * Set the active landmark windows of the loaded MTC CAs, then the vetted
+     * hashes of subtrees in those windows (landmark-relative MTC).  The windows
+     * come first: a hash is accepted only for a subtree that is active.
+     */
+    if (mtc_landmarks != NULL) {
+        if (mtc_cas == NULL) {
+            BIO_printf(bio_err, "-mtc_landmarks requires -mtc_cas\n");
+            goto end;
+        }
+        for (i = 0; i < sk_OPENSSL_STRING_num(mtc_landmarks); i++) {
+            if (!load_mtc_landmarks(mtc_cas,
+                    sk_OPENSSL_STRING_value(mtc_landmarks, i), vpm))
+                goto end;
+        }
+    }
+
+    if (mtc_subtrees_file != NULL) {
+        if (mtc_cas == NULL) {
+            BIO_printf(bio_err, "-mtc_subtrees requires -mtc_cas\n");
+            goto end;
+        }
+        if (!load_mtc_subtrees(mtc_cas, mtc_subtrees_file))
+            goto end;
+    }
 
     if (!set_cert_key_stuff(ctx, cert, key, chain, build_chain))
         goto end;
@@ -3641,6 +3686,7 @@ end:
 #endif
     SSL_CTX_free(ctx);
     /* Freed after the store that borrowed them. */
+    sk_OPENSSL_STRING_free(mtc_landmarks);
     sk_OSSL_MTC_CA_pop_free(mtc_cas, OSSL_MTC_CA_free);
     set_keylog_file(NULL, NULL);
     X509_free(cert);
@@ -3821,6 +3867,8 @@ static void print_ech_status(BIO *bio, SSL *s, int estat)
 
 static void print_stuff(BIO *bio, SSL *s, int full)
 {
+    const uint8_t *tas = NULL;
+    size_t tas_len = 0;
     X509 *peer = NULL;
     STACK_OF(X509) *sk;
     const SSL_CIPHER *c;
@@ -4039,6 +4087,35 @@ static void print_stuff(BIO *bio, SSL *s, int full)
         verify_result = SSL_get_verify_result(s);
         BIO_printf(bio, "Verify return code: %ld (%s)\n", verify_result,
             X509_verify_cert_error_string(verify_result));
+
+        /*
+         * The trust anchors the server said it has certification paths for, if
+         * it sent any.  An application that did not trust what it was served
+         * would choose one of these and connect again asking only for it; we
+         * report them so an operator can see what was on offer.
+         */
+        SSL_get0_peer_available_trust_anchors(s, &tas, &tas_len);
+        if (tas_len > 0) {
+            size_t off = 0;
+
+            BIO_puts(bio, "Available trust anchor IDs:\n");
+            while (off < tas_len) {
+                size_t idlen = tas[off++];
+                char *text;
+
+                if (idlen == 0 || idlen > tas_len - off)
+                    break;
+                if ((text = app_reloid_to_text(tas + off, idlen)) != NULL) {
+                    BIO_printf(bio, "    %s\n", text);
+                    OPENSSL_free(text);
+                } else {
+                    /* Not a relative OID after all; show what arrived. */
+                    BIO_hex_string(bio, 4, (int)idlen, tas + off, (int)idlen);
+                    BIO_puts(bio, "\n");
+                }
+                off += idlen;
+            }
+        }
     } else {
         /* In TLSv1.3 we do this on arrival of a NewSessionTicket */
         SSL_SESSION_print(bio, SSL_get_session(s));

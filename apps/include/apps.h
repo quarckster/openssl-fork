@@ -164,6 +164,13 @@ EVP_PKEY *load_keyparams_suppress(const char *uri, int format, int maybe_stdin,
     const char *keytype, const char *desc,
     int suppress_decode_errors);
 char *next_item(char *opt); /* in list separated by comma and/or space */
+/*
+ * Decode a relative OID, as trust anchor identifiers are carried on the wire,
+ * into dotted decimal.  Returns a string the caller frees, or NULL if the
+ * bytes are not a well-formed relative OID.
+ */
+char *app_reloid_to_text(const unsigned char *id, size_t id_len);
+
 /**
  * @brief Encode one relative OID component from its decimal text.
  * Appends the base-128 encoding of the decimal integer to buf.
@@ -208,6 +215,13 @@ int load_tai_credentials(SSL_CTX *ssl_ctx, const char *chains_path,
 
 /* Trust the Merkle Tree Certificate CAs in a file; the caller frees them. */
 STACK_OF(OSSL_MTC_CA) *load_mtc_cas(SSL_CTX *ctx, const char *file);
+
+/* Set one log's active landmarks, given as "id:log:file". */
+int load_mtc_landmarks(STACK_OF(OSSL_MTC_CA) *cas, const char *spec,
+    const X509_VERIFY_PARAM *vpm);
+
+/* Read vetted subtree hashes, one per line as "id log start end hash". */
+int load_mtc_subtrees(STACK_OF(OSSL_MTC_CA) *cas, const char *file);
 char *process_additional_mac_key_arguments(const char *arg);
 char *get_str_from_file(const char *filename);
 int load_cert_certs(const char *uri,

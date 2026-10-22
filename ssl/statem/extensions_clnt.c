@@ -1779,10 +1779,11 @@ EXT_RETURN tls_construct_ctos_trust_anchors(SSL_CONNECTION *s, WPACKET *pkt,
      * context with the CertificateRequest/EncryptedExtensions/Certificate forms
      * we accept on receipt, and this constructor is also reached when the client
      * builds its own Certificate message (client authentication), so guard on
-     * the message here.  The store is resolved exactly as in
-     * ssl_verify_cert_chain().  A landmark-relative advertisement (section 8.2
-     * of the Merkle Tree Certificates draft) is not yet supported: the CA does
-     * not track landmark numbers.  We ignore any reply from the server for now.
+     * the message here.  The store is chosen exactly as in
+     * ssl_verify_cert_chain().  An MTC CA with landmark state advertises its
+     * landmark groups (section 8.2.1 of the Merkle Tree Certificates draft)
+     * instead of its bare CA ID; the group signals support for standalone
+     * certificates as well.  We ignore any reply from the server for now.
      */
     if ((context & SSL_EXT_CLIENT_HELLO) == 0)
         return EXT_RETURN_NOT_SENT;
@@ -1809,7 +1810,13 @@ EXT_RETURN tls_construct_ctos_trust_anchors(SSL_CONNECTION *s, WPACKET *pkt,
         return EXT_RETURN_SENT;
     }
 
-    /* Default: advertise the configured MTC CAs, then the added IDs. */
+    /*
+     * Default: advertise the store's MTC CAs, then the added IDs.  Each MTC CA
+     * holds its advertisement precomputed (one landmark group ID per issuance
+     * log with landmark state, or its bare CA ID when none has any) as a run
+     * of u8-length-prefixed IDs, repacked whenever the CA is updated.  The
+     * added IDs are stored the same way.  All are appended verbatim.
+     */
     store = s->cert->verify_store != NULL
         ? s->cert->verify_store
         : sctx->cert_store;
@@ -1827,11 +1834,8 @@ EXT_RETURN tls_construct_ctos_trust_anchors(SSL_CONNECTION *s, WPACKET *pkt,
     }
 
     for (i = 0; i < num; i++) {
-        const uint8_t *id;
-        size_t id_len;
-
-        if (!OSSL_MTC_CA_get0_id(sk_OSSL_MTC_CA_value(cas, i), &id, &id_len)
-            || !WPACKET_sub_memcpy_u8(pkt, id, id_len)) {
+        if (!ossl_mtc_ca_put_advertised_ids(sk_OSSL_MTC_CA_value(cas, i),
+                pkt)) {
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
             return EXT_RETURN_FAIL;
         }
@@ -3129,4 +3133,55 @@ EXT_RETURN tls_construct_ctos_grease2(SSL_CONNECTION *s, WPACKET *pkt,
     }
 
     return EXT_RETURN_SENT;
+}
+
+/*
+ * The trust_anchors extension as a client receives it, in two forms (see
+ * https://datatracker.ietf.org/doc/draft-ietf-tls-trust-anchor-ids-05/).  In
+ * EncryptedExtensions it is the AvailableTrustAnchorList: the trust anchors
+ * the server has a certification path for, in its preference order, kept for
+ * the application, which may use it to try again with one the server has.
+ * Unlike the request form, that list may not be empty.  In the Certificate
+ * message it is the marker described below.
+ */
+int tls_parse_stoc_trust_anchors(SSL_CONNECTION *s, PACKET *pkt,
+    unsigned int context, X509 *x, size_t chainidx)
+{
+    PACKET id_list;
+
+    /*
+     * In the Certificate message the extension is the peer's marker that the
+     * certificate matched what we asked for: empty, and only in the first
+     * entry.  An extension we did not ask for is refused before we are called.
+     */
+    if (context == SSL_EXT_TLS1_3_CERTIFICATE) {
+        if (PACKET_remaining(pkt) != 0 || chainidx != 0) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
+            return 0;
+        }
+        s->ext.peer_matched_trust_anchor = 1;
+        return 1;
+    }
+
+    if (context != SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS)
+        return 1;
+
+    /* This list, unlike the request form, may not be empty. */
+    if (!PACKET_as_length_prefixed_2(pkt, &id_list)
+        || PACKET_remaining(&id_list) == 0
+        || !ossl_tls_valid_trust_anchor_list(&id_list)) {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
+        return 0;
+    }
+
+    OPENSSL_free(s->ext.peer_available_trust_anchors);
+    s->ext.peer_available_trust_anchors = NULL;
+    s->ext.peer_available_trust_anchors_len = 0;
+    if (!PACKET_memdup(&id_list, &s->ext.peer_available_trust_anchors,
+            &s->ext.peer_available_trust_anchors_len)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        return 0;
+    }
+
+    return 1;
 }
