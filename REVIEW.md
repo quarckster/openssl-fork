@@ -4,8 +4,8 @@ Review instructions
 This file configures Claude Code Review, the automated reviewer started
 with `@claude review`. "Important" and "Nit" are its severity labels:
 Important (🔴) marks security issues only, and Nit (🟡) marks everything
-else, including functional bugs that still need fixing. They are not a
-ranking for human reviewers.
+else. The labels say whether a finding is a security issue, not how much
+it matters to human reviewers.
 
 Every review covers, in this order of priority:
 
