@@ -40,6 +40,18 @@ static const struct {
     { (const uint8_t *)"\x00\x00", 2, 1 },
     /* A zero-length ID is not. */
     { (const uint8_t *)"\x00\x01\x00", 3, 0 },
+    /* A 32-byte ID is the longest. */
+    { (const uint8_t *)"\x00\x21\x20"
+                       "\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+                       "\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+                       "\x01\x01\x01\x01",
+        35, 1 },
+    /* One byte longer is rejected. */
+    { (const uint8_t *)"\x00\x22\x21"
+                       "\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+                       "\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+                       "\x01\x01\x01\x01\x01",
+        36, 0 },
     /* The list must fill its length. */
     { (const uint8_t *)"\x00\x05\x04\x81\xfd\x59", 6, 0 },
     /* An ID truncated by the list. */
@@ -310,6 +322,10 @@ static int test_requested_ta_setter(void)
 {
     static const uint8_t bad_trunc[] = { 0x04, 0x81, 0xfd }; /* claims 4 */
     static const uint8_t bad_zero[] = { 0x00 }; /* empty ID */
+    static const uint8_t bad_long[] = { 0x21, 0x01, 0x01, 0x01, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x01 }; /* 33-byte ID */
     SSL_CTX *ctx = NULL;
     SSL *ssl = NULL;
     SSL_CONNECTION *sc;
@@ -331,7 +347,9 @@ static int test_requested_ta_setter(void)
     if (!TEST_false(SSL_set1_requested_trust_anchors(ssl, bad_trunc,
             sizeof(bad_trunc)))
         || !TEST_false(SSL_set1_requested_trust_anchors(ssl, bad_zero,
-            sizeof(bad_zero))))
+            sizeof(bad_zero)))
+        || !TEST_false(SSL_set1_requested_trust_anchors(ssl, bad_long,
+            sizeof(bad_long))))
         goto err;
     ERR_clear_error();
 
@@ -578,6 +596,106 @@ err:
     return ret;
 }
 
+/**
+ * @brief Make an unsigned certificate whose subject is one attribute.
+ * @param nid the attribute type
+ * @param type the ASN.1 type of the value
+ * @param value the attribute value
+ * @param value_len the number of bytes at value
+ * @returns the certificate, or NULL on error
+ */
+static X509 *cert_with_subject(int nid, int type, const uint8_t *value,
+    size_t value_len)
+{
+    X509 *cert = NULL;
+    X509_NAME *name = NULL;
+
+    if (!TEST_ptr(cert = X509_new())
+        || !TEST_ptr(name = X509_NAME_new())
+        || !TEST_true(X509_NAME_add_entry_by_NID(name, nid, type, value,
+            (int)value_len, -1, 0))
+        || !TEST_true(X509_set_subject_name(cert, name))) {
+        X509_free(cert);
+        cert = NULL;
+    }
+    X509_NAME_free(name);
+    return cert;
+}
+
+/*
+ * A certificate in the store whose subject names a trust anchor ID has the ID
+ * requested by default, once however often it is added; one with an ordinary
+ * subject contributes nothing.  The added IDs follow.
+ */
+static int test_default_ta_construct_decorated(void)
+{
+    /* The universal tag of a RELATIVE-OID. */
+    static const int relative_oid = 13;
+    /* 32473.1 as TrustAnchorID relative-OID bytes. */
+    static const uint8_t id[] = { 0x81, 0xfd, 0x59, 0x01 };
+    static const uint8_t cn[] = "Root CA";
+    /* The extension: one ID, 32473.1. */
+    static const uint8_t expect[] = { 0xca, 0x34, 0x00, 0x07, 0x00, 0x05, 0x04,
+        0x81, 0xfd, 0x59, 0x01 };
+    /* 32473.1 from the store, then the added 32473.1. */
+    static const uint8_t expect_added[] = { 0xca, 0x34, 0x00, 0x0c, 0x00, 0x0a,
+        0x04, 0x81, 0xfd, 0x59, 0x01, 0x04, 0x81, 0xfd, 0x59, 0x01 };
+    SSL_CTX *ctx = NULL;
+    SSL *ssl = NULL;
+    SSL_CONNECTION *sc;
+    X509_STORE *store;
+    X509 *plain = NULL, *decorated = NULL, *again = NULL;
+    WPACKET pkt;
+    uint8_t buf[64];
+    int have_pkt = 0, ret = 0;
+
+    if (!TEST_ptr(ctx = SSL_CTX_new(TLS_client_method()))
+        || !TEST_ptr(store = SSL_CTX_get_cert_store(ctx))
+        || !TEST_ptr(ssl = SSL_new(ctx))
+        || !TEST_ptr(sc = SSL_CONNECTION_FROM_SSL(ssl))
+        || !TEST_ptr(plain = cert_with_subject(NID_commonName, MBSTRING_ASC,
+                         cn, sizeof(cn) - 1))
+        || !TEST_ptr(decorated = cert_with_subject(NID_id_rdna_trustAnchorID,
+                         relative_oid, id, sizeof(id)))
+        || !TEST_ptr(again = cert_with_subject(NID_id_rdna_trustAnchorID,
+                         relative_oid, id, sizeof(id))))
+        goto err;
+
+    /* An ordinary subject leaves the extension unsent. */
+    if (!TEST_true(X509_STORE_add_cert(store, plain))
+        || !TEST_true(WPACKET_init_static_len(&pkt, buf, sizeof(buf), 0)))
+        goto err;
+    have_pkt = 1;
+    if (!TEST_int_eq(tls_construct_ctos_trust_anchors(sc, &pkt,
+                         SSL_EXT_CLIENT_HELLO, NULL, 0),
+            EXT_RETURN_NOT_SENT))
+        goto err;
+
+    /* The decorated certificate's ID is requested, once. */
+    if (!TEST_true(X509_STORE_add_cert(store, decorated))
+        || !TEST_true(X509_STORE_add_cert(store, decorated))
+        || !TEST_true(X509_STORE_add_cert(store, again))
+        || !construct_matches(sc, expect, sizeof(expect)))
+        goto err;
+
+    /* An added ID follows the store's. */
+    if (!TEST_true(SSL_add1_requested_trust_anchors(ssl, req_good,
+            sizeof(req_good)))
+        || !construct_matches(sc, expect_added, sizeof(expect_added)))
+        goto err;
+
+    ret = 1;
+err:
+    if (have_pkt)
+        WPACKET_cleanup(&pkt);
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+    X509_free(plain);
+    X509_free(decorated);
+    X509_free(again);
+    return ret;
+}
+
 int setup_tests(void)
 {
     if (!TEST_ptr(server_ctx = SSL_CTX_new(TLS_server_method())))
@@ -591,6 +709,7 @@ int setup_tests(void)
     ADD_TEST(test_added_ta_construct);
     ADD_TEST(test_added_ta_empty);
     ADD_TEST(test_default_ta_construct_landmarks);
+    ADD_TEST(test_default_ta_construct_decorated);
     return 1;
 }
 
