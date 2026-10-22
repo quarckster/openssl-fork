@@ -38,6 +38,8 @@
 #include <openssl/rand.h>
 #include <openssl/bn.h>
 #include <openssl/buffer.h>
+#include "internal/o_dir.h" /* for OPENSSL_DIR_read */
+#include <openssl/mtc.h>
 #include <openssl/ssl.h>
 #include <openssl/core_names.h>
 #include <openssl/encoder.h>
@@ -61,6 +63,10 @@ static int WIN32_rename(const char *from, const char *to);
 #if defined(OPENSSL_SYS_MSDOS) && !defined(_WIN32) || defined(__BORLANDC__)
 #define _kbhit kbhit
 #endif
+
+#if !defined(PATH_MAX)
+#define PATH_MAX 4096
+#endif /* !defined(PATH_MAX) */
 
 static BIO *bio_open_default_(const char *filename, char mode, int format,
     int quiet);
@@ -694,6 +700,157 @@ void *app_malloc_array(size_t n, size_t sz, const char *what)
         app_bail_out("%s: Could not allocate %zu*%zu bytes for %s\n",
             opt_getprog(), n, sz, what);
     return vp;
+}
+
+/* Argument bundle for tai_chains_cb() passed through tai_for_each_pem(). */
+struct tai_chain_arg {
+    STACK_OF(EVP_PKEY) *keys;
+    STACK_OF(SSL_CREDENTIAL) *creds;
+};
+
+static int tai_keys_cb(BIO *in, void *arg)
+{
+    return SSL_parse_private_keys(in, (STACK_OF(EVP_PKEY) *)arg);
+}
+
+static int tai_chains_cb(BIO *in, void *arg)
+{
+    struct tai_chain_arg *a = arg;
+
+    return SSL_parse_certificates_with_properties(in, a->keys, a->creds);
+}
+
+/*
+ * Call cb(in, arg) on path if it is a file, or on each file it contains if it
+ * is a directory.  Returns 1 on success, 0 on the first failure.
+ */
+static int tai_for_each_pem(const char *path, int (*cb)(BIO *in, void *arg),
+    void *arg)
+{
+    OPENSSL_DIR_CTX *d = NULL;
+    const char *name;
+    BIO *in;
+    int ok, n;
+
+    if (app_isdir(path) <= 0) {
+        if ((in = BIO_new_file(path, "r")) == NULL)
+            return 0;
+        ok = cb(in, arg);
+        BIO_free(in);
+        return ok;
+    }
+
+    ok = 1;
+    while (ok && (name = OPENSSL_DIR_read(&d, path)) != NULL) {
+        char filepath[PATH_MAX];
+
+#ifdef OPENSSL_SYS_VMS
+        n = snprintf(filepath, sizeof(filepath), "%s%s", path, name);
+#else
+        n = snprintf(filepath, sizeof(filepath), "%s/%s", path, name);
+#endif
+        if (n < 0 || (size_t)n >= sizeof(filepath)) {
+            ok = 0;
+            break;
+        }
+        if (app_isdir(filepath) > 0)
+            continue;
+        if ((in = BIO_new_file(filepath, "r")) == NULL) {
+            ok = 0;
+            break;
+        }
+        ok = cb(in, arg);
+        BIO_free(in);
+    }
+    if (d != NULL)
+        OPENSSL_DIR_end(&d);
+    return ok;
+}
+
+/*
+ * Install trust anchor decorated certificate chains as negotiation gated
+ * credentials.  Each chain in
+ * chains_path (a file, or a directory of PEM files) becomes a credential that
+ * is served only when the peer requests its trust anchor.  Each chain's key is
+ * matched by public key among the keys in its file and in keys_path.  From a
+ * file, chains keep their file order (their preference order); from a
+ * directory they are installed in ascending on-the-wire size, so the smallest
+ * is preferred.
+ */
+int load_tai_credentials(SSL_CTX *ssl_ctx, const char *chains_path,
+    const char *keys_path)
+{
+    STACK_OF(EVP_PKEY) *keys = NULL;
+    STACK_OF(SSL_CREDENTIAL) *creds = NULL;
+    struct tai_chain_arg arg;
+    int i, ret = 0;
+
+    if ((creds = sk_SSL_CREDENTIAL_new_null()) == NULL)
+        goto err;
+    if (keys_path != NULL) {
+        if ((keys = sk_EVP_PKEY_new_null()) == NULL
+            || !tai_for_each_pem(keys_path, tai_keys_cb, keys)) {
+            BIO_printf(bio_err, "Failed to load TAI keys: %s\n", keys_path);
+            goto err;
+        }
+    }
+    arg.keys = keys;
+    arg.creds = creds;
+    if (!tai_for_each_pem(chains_path, tai_chains_cb, &arg)) {
+        BIO_printf(bio_err, "Failed to load TAI chains: %s\n", chains_path);
+        goto err;
+    }
+    if (app_isdir(chains_path) > 0) {
+        sk_SSL_CREDENTIAL_set_cmp_func(creds, SSL_CREDENTIAL_size_cmp);
+        sk_SSL_CREDENTIAL_sort(creds);
+    }
+    for (i = 0; i < sk_SSL_CREDENTIAL_num(creds); i++) {
+        if (!SSL_CTX_add1_credential(ssl_ctx, sk_SSL_CREDENTIAL_value(creds, i))) {
+            BIO_printf(bio_err, "Failed to install TAI credential\n");
+            goto err;
+        }
+    }
+    ret = 1;
+err:
+    sk_SSL_CREDENTIAL_pop_free(creds, SSL_CREDENTIAL_free);
+    sk_EVP_PKEY_pop_free(keys, EVP_PKEY_free);
+    return ret;
+}
+
+/*
+ * Trust the Merkle Tree Certificate CAs in file, adding each to ctx's verify
+ * store.  This both lets the certificates they issue be verified and puts
+ * their trust anchor IDs in what we request of the peer.  The store borrows
+ * the CAs, so the returned stack must outlive ctx; free it with
+ * sk_OSSL_MTC_CA_pop_free(stack, OSSL_MTC_CA_free).  Returns NULL on failure.
+ */
+STACK_OF(OSSL_MTC_CA) *load_mtc_cas(SSL_CTX *ctx, const char *file)
+{
+    STACK_OF(OSSL_MTC_CA) *cas = NULL;
+    X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+    BIO *in = BIO_new_file(file, "r");
+    int i, ok = 0;
+
+    if (in != NULL
+        && (cas = sk_OSSL_MTC_CA_new(OSSL_MTC_CA_cmp)) != NULL
+        && OSSL_MTC_CA_parse_certificates(app_get0_libctx(), app_get0_propq(),
+            in, cas)) {
+        ok = 1;
+        for (i = 0; i < sk_OSSL_MTC_CA_num(cas); i++) {
+            if (!X509_STORE_trust_mtc_ca(store,
+                    sk_OSSL_MTC_CA_value(cas, i))) {
+                ok = 0;
+                break;
+            }
+        }
+    }
+    BIO_free(in);
+    if (!ok) {
+        BIO_printf(bio_err, "Error loading MTC CAs from %s\n", file);
+        sk_OSSL_MTC_CA_pop_free(cas, OSSL_MTC_CA_free);
+        return NULL;
+    }
+    return cas;
 }
 
 /* Append len bytes at p to buf. */
