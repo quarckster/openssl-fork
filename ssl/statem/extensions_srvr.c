@@ -1269,17 +1269,32 @@ int tls_parse_ctos_supported_groups(SSL_CONNECTION *s, PACKET *pkt,
 }
 
 /*
- * Parse the peer's trust_anchors extension from the ClientHello (section 4 of
- * https://datatracker.ietf.org/doc/draft-ietf-tls-trust-anchor-ids-05/): a
- * RequestedTrustAnchorList of the trust anchor IDs the relying party
- * supports, each a nonempty u8-length-prefixed string of at most 255 bytes.
- * The list MAY be empty.  It is saved for certificate selection, an empty
- * list meaning the peer supports the extension but disclosed no IDs.
+ * Parse the peer's trust_anchors extension (section 5 of
+ * https://datatracker.ietf.org/doc/draft-ietf-tls-trust-anchor-ids-05/).  From
+ * the ClientHello it is a RequestedTrustAnchorList of the trust anchor IDs the
+ * relying party supports, each a nonempty u8-length-prefixed string of at most
+ * 255 bytes.  The list MAY be empty.  It is saved for certificate selection,
+ * an empty list meaning the peer supports the extension but disclosed no IDs.
+ * From the client's Certificate message it is the marker described below.
  */
 int tls_parse_ctos_trust_anchors(SSL_CONNECTION *s, PACKET *pkt,
     unsigned int context, X509 *x, size_t chainidx)
 {
     PACKET id_list;
+
+    /*
+     * In the client's Certificate message the extension is its marker that the
+     * certificate matched what we asked for: empty, and only in the first
+     * entry.  An extension we did not ask for is refused before we are called.
+     */
+    if (context == SSL_EXT_TLS1_3_CERTIFICATE) {
+        if (PACKET_remaining(pkt) != 0 || chainidx != 0) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
+            return 0;
+        }
+        s->ext.peer_matched_trust_anchor = 1;
+        return 1;
+    }
 
     if (!PACKET_as_length_prefixed_2(pkt, &id_list)
         || !ossl_tls_valid_trust_anchor_list(&id_list)) {
@@ -1387,13 +1402,18 @@ EXT_RETURN tls_construct_stoc_trust_anchors(SSL_CONNECTION *s, WPACKET *pkt,
     /*
      * This extension shares its definition with the ClientHello request form.
      * In EncryptedExtensions it lists the trust anchors we have; in the
-     * Certificate message it acknowledges that the certificate we served
-     * matched what the client asked for, which is an empty extension in the
-     * first CertificateEntry only.  See
+     * CertificateRequest it asks for a client certificate from trust anchors
+     * we accept; in the Certificate message it acknowledges that the
+     * certificate we served matched what the client asked for, which is an
+     * empty extension in the first CertificateEntry only.  See
      * https://datatracker.ietf.org/doc/draft-ietf-tls-trust-anchor-ids-05/.
      */
     if (context == SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS)
         return construct_stoc_available_trust_anchors(s, pkt);
+
+    /* Asking for a client certificate, we are the relying party. */
+    if (context == SSL_EXT_TLS1_3_CERTIFICATE_REQUEST)
+        return ossl_tls_construct_requested_trust_anchors(s, pkt);
 
     if (context != SSL_EXT_TLS1_3_CERTIFICATE
         || s->s3.tmp.credential == NULL || chainidx != 0)
