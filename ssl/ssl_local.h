@@ -1175,6 +1175,27 @@ struct ssl_ctx_st {
 #endif
 
         unsigned char cookie_hmac_key[SHA256_DIGEST_LENGTH];
+
+        /*
+         * The default RequestedTrustAnchorList advertised by clients created
+         * from this context, as wire-format u8-length-prefixed trust anchor
+         * IDs.  See the matching fields in the SSL_CONNECTION extension state;
+         * set with SSL_CTX_set1_requested_trust_anchors().
+         */
+        size_t requested_trust_anchors_len;
+        uint8_t *requested_trust_anchors;
+        int requested_trust_anchors_set;
+
+        /*
+         * Trust anchor IDs advertised by connections created from this
+         * context after the default list, as wire-format u8-length-prefixed
+         * trust anchor IDs.  Set with SSL_CTX_add1_requested_trust_anchors();
+         * when added_trust_anchors_set is 1 the extension is sent even if the
+         * resulting list is empty.  Unused when requested_trust_anchors_set.
+         */
+        size_t added_trust_anchors_len;
+        uint8_t *added_trust_anchors;
+        int added_trust_anchors_set;
 #ifndef OPENSSL_NO_ECH
         OSSL_ECH_CTX ech;
 #endif
@@ -1790,6 +1811,29 @@ struct ssl_connection_st {
         size_t peer_requested_trust_anchors_len;
         uint8_t *peer_requested_trust_anchors;
         int peer_sent_trust_anchors;
+
+        /*
+         * The RequestedTrustAnchorList this client advertises, as wire-format
+         * u8-length-prefixed trust anchor IDs.  When requested_trust_anchors_set
+         * is 0 the list has not been configured and the trusted MTC CAs are
+         * advertised by default; when 1 this list is sent verbatim, even when
+         * empty.  Set with SSL_set1_requested_trust_anchors(); inherited from
+         * the SSL_CTX when not set here.
+         */
+        size_t requested_trust_anchors_len;
+        uint8_t *requested_trust_anchors;
+        int requested_trust_anchors_set;
+
+        /*
+         * Trust anchor IDs this connection advertises after the default list
+         * and the SSL_CTX's added IDs, as wire-format u8-length-prefixed trust
+         * anchor IDs.  Set with SSL_add1_requested_trust_anchors(); when
+         * added_trust_anchors_set is 1 the extension is sent even if the
+         * resulting list is empty.  Unused when an explicit list is set.
+         */
+        size_t added_trust_anchors_len;
+        uint8_t *added_trust_anchors;
+        int added_trust_anchors_set;
 
         /* key shares */
         size_t keyshares_len;
@@ -2616,7 +2660,7 @@ struct ssl_credential_st {
     size_t group_count;
     CRYPTO_REF_COUNT references;
 };
-DEFINE_STACK_OF(SSL_CREDENTIAL)
+/* STACK_OF(SSL_CREDENTIAL) is declared publicly in <openssl/ssl.h.in>. */
 
 /**
  * @brief Create an empty credential of the given form.
@@ -2679,6 +2723,25 @@ int ossl_ssl_credential_set1_trust_anchor_id(SSL_CREDENTIAL *cred,
  */
 int ossl_ssl_credential_add1_trust_anchor_group(SSL_CREDENTIAL *cred,
     const uint8_t *pattern, size_t pattern_len);
+
+/**
+ * @brief Apply an encoded CertificatePropertyList to a credential.
+ *
+ * Parses the property list and sets the credential's trust anchor ID and
+ * trust anchor group patterns from the trust_anchor_id and
+ * trust_anchor_groups properties; see section 7 of
+ * https://datatracker.ietf.org/doc/draft-ietf-tls-trust-anchor-ids-05/.
+ * Properties must be numerically sorted by type with no duplicates, and the
+ * trust_anchor_negotiation property must be empty; unknown property types are
+ * ignored but must be well formed.
+ *
+ * @param cred the credential to populate
+ * @param props the encoded CertificatePropertyList
+ * @param props_len the length of props in bytes
+ * @return 1 on success, 0 on a malformed property list
+ */
+int ossl_ssl_credential_set1_certificate_properties(SSL_CREDENTIAL *cred,
+    const uint8_t *props, size_t props_len);
 
 /**
  * @brief Check whether a trust anchor ID pattern contains a trust anchor ID.
